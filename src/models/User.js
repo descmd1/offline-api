@@ -4,7 +4,7 @@ const bcrypt = require('bcryptjs');
 const userSchema = new mongoose.Schema({
   name: { type: String, required: true },
   email: { type: String, required: true, unique: true },
-  accountNumber: { type: String, required: true, unique: true },
+  accountNumber: { type: String, unique: true },
   password: { type: String, required: true },
   pin: { type: String }, // For PIN-based auth
   createdAt: { type: Date, default: Date.now }
