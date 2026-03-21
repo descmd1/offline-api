@@ -1,38 +1,85 @@
 const express = require('express');
 const router = express.Router();
+const { body, query } = require('express-validator');
 const auth = require('../middleware/auth');
 const {
-	getBalance,
-	fundWallet,
-	withdrawToBank,
-	transfer,
-	payBill,
-	getTransactions,
-	externalBankTransfer,
-	buyAirtime
+  getBalance,
+  fundWallet,
+  withdrawToBank,
+  transfer,
+  payBill,
+  getTransactions,
+  externalBankTransfer,
+  buyAirtime,
 } = require('../controllers/walletController');
-// Buy airtime
-router.post('/airtime', auth, buyAirtime);
-// External bank transfer (real payment API integration)
-router.post('/external-transfer', auth, externalBankTransfer);
 
+const amountValidation = body('amount')
+  .isFloat({ min: 1 })
+  .withMessage('Amount must be a positive number');
 
-// Wallet balance
+// Balance
 router.get('/balance', auth, getBalance);
 
-// Fund wallet (simulate funding from bank/agent)
-router.post('/fund', auth, fundWallet);
+// Fund wallet
+router.post('/fund', auth, [amountValidation], fundWallet);
 
 // Withdraw to bank
-router.post('/withdraw', auth, withdrawToBank);
+router.post('/withdraw', auth, [amountValidation], withdrawToBank);
 
 // Transfer to another user
-router.post('/transfer', auth, transfer);
+router.post(
+  '/transfer',
+  auth,
+  [
+    amountValidation,
+    body('accountNumber').notEmpty().withMessage('Recipient account number is required'),
+  ],
+  transfer
+);
+
+// External bank transfer
+router.post(
+  '/external-transfer',
+  auth,
+  [
+    amountValidation,
+    body('accountNumber').notEmpty().withMessage('Account number is required'),
+    body('bankCode').notEmpty().withMessage('Bank code is required'),
+  ],
+  externalBankTransfer
+);
+
+// Buy airtime
+router.post(
+  '/airtime',
+  auth,
+  [
+    amountValidation,
+    body('phone').notEmpty().isMobilePhone('en-NG').withMessage('Valid Nigerian phone number required'),
+    body('network')
+      .isIn(['mtn', 'airtel', 'glo', '9mobile'])
+      .withMessage('Network must be one of: mtn, airtel, glo, 9mobile'),
+  ],
+  buyAirtime
+);
 
 // Pay bill
-router.post('/pay-bill', auth, payBill);
+router.post(
+  '/pay-bill',
+  auth,
+  [amountValidation, body('biller').notEmpty().withMessage('Biller is required')],
+  payBill
+);
 
-// Get transaction history
-router.get('/transactions', auth, getTransactions);
+// Transaction history (with optional pagination)
+router.get(
+  '/transactions',
+  auth,
+  [
+    query('page').optional().isInt({ min: 1 }),
+    query('limit').optional().isInt({ min: 1, max: 50 }),
+  ],
+  getTransactions
+);
 
 module.exports = router;
