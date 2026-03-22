@@ -8,6 +8,7 @@ const {
   withdrawToBank,
   transfer,
   getBanks,
+  resolveBankAccount,
   payBill,
   getTransactions,
   externalBankTransfer,
@@ -23,6 +24,21 @@ router.get('/balance', auth, getBalance);
 
 // Nigerian banks list (for external transfer selection)
 router.get('/banks', auth, getBanks);
+
+// Resolve recipient account name for selected bank
+router.get(
+  '/resolve-account',
+  auth,
+  [
+    query('accountNumber')
+      .notEmpty()
+      .isLength({ min: 10, max: 10 })
+      .withMessage('Valid 10-digit account number is required'),
+    query('bankCode').optional({ checkFalsy: true }).isString(),
+    query('bankName').optional({ checkFalsy: true }).isString(),
+  ],
+  resolveBankAccount
+);
 
 // Fund wallet
 router.post('/fund', auth, [amountValidation], fundWallet);

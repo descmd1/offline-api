@@ -66,6 +66,67 @@ exports.getBanks = async (_req, res) => {
   }
 };
 
+// ─── Resolve Nigerian Bank Account ──────────────────────────────────────────
+exports.resolveBankAccount = async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) return res.status(422).json({ message: errors.array()[0].msg });
+
+  try {
+    const { accountNumber, bankCode, bankName } = req.query;
+
+    if (!bankCode && !bankName) {
+      return res.status(422).json({ message: 'Bank name or bank code is required' });
+    }
+
+    if (!PAYSTACK_SECRET_KEY) {
+      return res.status(500).json({ message: 'Account resolution provider is not configured' });
+    }
+
+    let resolvedBankCode = bankCode;
+    let resolvedBankName = bankName;
+
+    if (!resolvedBankCode && resolvedBankName) {
+      const banks = await getBanksFromProvider();
+      const matched = banks.find(
+        (bank) => bank.name.toLowerCase() === String(resolvedBankName).toLowerCase()
+      );
+      if (!matched) {
+        return res.status(422).json({ message: 'Selected bank is invalid' });
+      }
+      resolvedBankCode = matched.code;
+      resolvedBankName = matched.name;
+    }
+
+    if (!resolvedBankName && resolvedBankCode) {
+      const banks = await getBanksFromProvider();
+      const matched = banks.find((bank) => bank.code === String(resolvedBankCode));
+      resolvedBankName = matched?.name;
+    }
+
+    const response = await axios.get('https://api.paystack.co/bank/resolve', {
+      params: {
+        account_number: accountNumber,
+        bank_code: resolvedBankCode,
+      },
+      headers: { Authorization: `Bearer ${PAYSTACK_SECRET_KEY}` },
+    });
+
+    if (!response.data?.status || !response.data?.data?.account_name) {
+      return res.status(502).json({ message: 'Unable to resolve account name' });
+    }
+
+    return res.json({
+      accountName: response.data.data.account_name,
+      accountNumber,
+      bankCode: resolvedBankCode,
+      bankName: resolvedBankName,
+    });
+  } catch (err) {
+    console.error('resolveBankAccount error:', err);
+    return res.status(502).json({ message: 'Unable to resolve account name', error: extractError(err) });
+  }
+};
+
 // ─── Fund Wallet ─────────────────────────────────────────────────────────────
 exports.fundWallet = async (req, res) => {
   const errors = validationResult(req);
