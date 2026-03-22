@@ -6,10 +6,38 @@ const Transaction = require('../models/Transaction');
 const User = require('../models/User');
 
 const PAYSTACK_SECRET_KEY = process.env.PAYSTACK_SECRET_KEY;
+const BANK_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+let banksCache = { data: null, fetchedAt: 0 };
 
 // Helper to extract error message
 const extractError = (err) =>
   err.response?.data?.message || err.message || 'Unknown error';
+
+const getBanksFromProvider = async () => {
+  const cacheFresh =
+    banksCache.data && Date.now() - banksCache.fetchedAt < BANK_CACHE_TTL_MS;
+
+  if (cacheFresh) return banksCache.data;
+
+  const response = await axios.get(
+    'https://api.paystack.co/bank?country=nigeria&currency=NGN&perPage=100',
+    {
+      headers: { Authorization: `Bearer ${PAYSTACK_SECRET_KEY}` },
+    }
+  );
+
+  if (!response.data?.status) {
+    throw new Error('Unable to fetch bank list');
+  }
+
+  const banks = (response.data.data || [])
+    .filter((bank) => bank?.active !== false && bank?.code && bank?.name)
+    .map((bank) => ({ name: bank.name, code: bank.code }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  banksCache = { data: banks, fetchedAt: Date.now() };
+  return banks;
+};
 
 // ─── Balance ────────────────────────────────────────────────────────────────
 exports.getBalance = async (req, res) => {
@@ -20,6 +48,21 @@ exports.getBalance = async (req, res) => {
   } catch (err) {
     console.error('getBalance error:', err);
     return res.status(500).json({ message: 'Unable to fetch balance' });
+  }
+};
+
+// ─── Nigerian Banks ─────────────────────────────────────────────────────────
+exports.getBanks = async (_req, res) => {
+  try {
+    if (!PAYSTACK_SECRET_KEY) {
+      return res.status(500).json({ message: 'Bank list provider is not configured' });
+    }
+
+    const banks = await getBanksFromProvider();
+    return res.json({ banks });
+  } catch (err) {
+    console.error('getBanks error:', err);
+    return res.status(502).json({ message: 'Unable to fetch bank list', error: extractError(err) });
   }
 };
 
@@ -145,7 +188,26 @@ exports.externalBankTransfer = async (req, res) => {
   if (!errors.isEmpty()) return res.status(422).json({ message: errors.array()[0].msg });
 
   try {
-    const { accountNumber, bankCode, amount, reference, details } = req.body;
+    const { accountNumber, bankCode, bankName, amount, reference, details } = req.body;
+
+    if (!bankCode && !bankName) {
+      return res.status(422).json({ message: 'Bank name or bank code is required' });
+    }
+
+    let resolvedBankCode = bankCode;
+    if (!resolvedBankCode && bankName) {
+      if (!PAYSTACK_SECRET_KEY) {
+        return res.status(500).json({ message: 'Bank list provider is not configured' });
+      }
+      const banks = await getBanksFromProvider();
+      const matched = banks.find(
+        (bank) => bank.name.toLowerCase() === String(bankName).toLowerCase()
+      );
+      if (!matched) {
+        return res.status(422).json({ message: 'Selected bank is invalid' });
+      }
+      resolvedBankCode = matched.code;
+    }
 
     const wallet = await Wallet.findOne({ user: req.user.id });
     if (!wallet || wallet.balance < amount) {
@@ -164,7 +226,7 @@ exports.externalBankTransfer = async (req, res) => {
           type: 'nuban',
           name: user?.name || 'Recipient',
           account_number: accountNumber,
-          bank_code: bankCode,
+          bank_code: resolvedBankCode,
           currency: 'NGN',
         },
         {
@@ -221,7 +283,8 @@ exports.externalBankTransfer = async (req, res) => {
       details: {
         ...details,
         to: accountNumber,
-        bankCode,
+        bankCode: resolvedBankCode,
+        bankName,
         paystack_transfer_code: transferData.transfer_code,
       },
     });

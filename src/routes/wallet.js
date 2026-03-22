@@ -7,6 +7,7 @@ const {
   fundWallet,
   withdrawToBank,
   transfer,
+  getBanks,
   payBill,
   getTransactions,
   externalBankTransfer,
@@ -19,6 +20,9 @@ const amountValidation = body('amount')
 
 // Balance
 router.get('/balance', auth, getBalance);
+
+// Nigerian banks list (for external transfer selection)
+router.get('/banks', auth, getBanks);
 
 // Fund wallet
 router.post('/fund', auth, [amountValidation], fundWallet);
@@ -44,7 +48,8 @@ router.post(
   [
     amountValidation,
     body('accountNumber').notEmpty().withMessage('Account number is required'),
-    body('bankCode').notEmpty().withMessage('Bank code is required'),
+    body('bankCode').optional({ checkFalsy: true }).isString(),
+    body('bankName').optional({ checkFalsy: true }).isString(),
   ],
   externalBankTransfer
 );
